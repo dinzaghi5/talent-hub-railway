@@ -1,0 +1,4 @@
+Roles found: [(1, 'Admin', datetime.datetime(2026, 1, 11, 14, 6, 11, 456759, tzinfo=datetime.timezone.utc), None, datetime.datetime(2026, 1, 11, 14, 6, 11, 456759, tzinfo=datetime.timezone.utc), None)]
+Using Role ID: 1
+Attempting to create user...
+User created successfully. ID: 2

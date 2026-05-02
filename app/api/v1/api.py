@@ -1,0 +1,23 @@
+from fastapi import APIRouter
+from app.api.v1.endpoints import users, login, social_media, country, city, interest, sow, brand, pdf, export, invoice, list_creator_header, list_creator_detail, quotation, quotation_detail, report, kol, invoice_header, invoice_detail
+
+api_router = APIRouter()
+api_router.include_router(login.router, tags=["login"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(social_media.router, prefix="/social-media", tags=["social-media"])
+api_router.include_router(country.router, prefix="/countries", tags=["countries"])
+api_router.include_router(city.router, prefix="/cities", tags=["cities"])
+api_router.include_router(interest.router, prefix="/interests", tags=["interests"]) 
+api_router.include_router(sow.router, prefix="/sow", tags=["sow"])
+api_router.include_router(brand.router, prefix="/brand", tags=["brand"])
+api_router.include_router(pdf.router, prefix="/pdf", tags=["quotation"])
+api_router.include_router(invoice.router, prefix="/pdf", tags=["invoice"])
+api_router.include_router(export.router, prefix="", tags=["report"])
+api_router.include_router(list_creator_header.router, prefix="/list-creator-header", tags=["list-creator-header"])
+api_router.include_router(list_creator_detail.router, prefix="/list-creator-detail", tags=["list-creator-detail"])
+api_router.include_router(quotation.router, prefix="/quotations", tags=["quotations"])
+api_router.include_router(quotation_detail.router, prefix="/quotation-details", tags=["quotation-details"])
+api_router.include_router(report.router, prefix="/reports", tags=["reports"])
+api_router.include_router(invoice_header.router, prefix="/invoice-headers", tags=["invoice-header"])
+api_router.include_router(kol.router, prefix="/kol", tags=["kol"])
+api_router.include_router(invoice_detail.router, prefix="/invoice-details", tags=["invoice-detail"])
