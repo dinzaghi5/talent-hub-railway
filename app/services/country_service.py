@@ -22,6 +22,20 @@ class CountryService:
         await db.refresh(db_obj)
         return db_obj
 
+    async def create_multi(self, db: AsyncSession, objs_in: list[CountryCreate]) -> list[Country]:
+        db_objs = [
+            Country(
+                country_nm=obj.country_nm,
+                created_by="SYSTEM"
+            )
+            for obj in objs_in
+        ]
+        db.add_all(db_objs)
+        await db.commit()
+        for db_obj in db_objs:
+            await db.refresh(db_obj)
+        return db_objs
+
     async def update(self, db: AsyncSession, *, db_obj: Country, obj_in: CountryUpdate) -> Country:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():

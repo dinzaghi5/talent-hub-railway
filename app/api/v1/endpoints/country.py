@@ -8,15 +8,15 @@ from app.services.country_service import country_service
 
 router = APIRouter()
 
-@router.post("/", response_model=CountryResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=List[CountryResponse], status_code=status.HTTP_201_CREATED)
 async def create_country(
-    country_in: CountryCreate,
+    countries_in: List[CountryCreate],
     db: AsyncSession = Depends(deps.get_db)
 ):
     """
-    Create new country.
+    Create new countries.
     """
-    return await country_service.create(db, obj_in=country_in)
+    return await country_service.create_multi(db, objs_in=countries_in)
 
 @router.get("/", response_model=List[CountryResponse])
 async def read_countries(
