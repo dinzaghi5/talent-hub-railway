@@ -5,7 +5,8 @@ from typing import Optional, List
 from datetime import date
 from app.models.report import Report
 from app.models.quotation import QuotationHeader
-from app.schemas.quotation import QuotationCreate, QuotationUpdate
+from app.models.quotation_detail import QuotationDetail
+from app.schemas.quotation import QuotationCreate, QuotationUpdate, QuotationWithDetailCreate
 
 
 class QuotationService:
@@ -65,6 +66,52 @@ class QuotationService:
         await db.commit()
         await db.refresh(db_obj)
         return db_obj
+
+    async def create_with_details(self, db: AsyncSession, obj_in: QuotationWithDetailCreate) -> QuotationHeader:
+        # Auto-generate quotation_code
+        quotation_code = await self._generate_quotation_code(db)
+
+        # Create Header
+        db_header = QuotationHeader(
+            quotation_code=quotation_code,
+            invoice_code=obj_in.invoice_code,
+            brand_name=obj_in.brand_name,
+            status_quotation=obj_in.status_quotation,
+            project=obj_in.project,
+            quotation_date=obj_in.quotation_date,
+            subtotal=obj_in.subtotal,
+            dpp=obj_in.dpp,
+            ppn=obj_in.ppn,
+            grand_total=obj_in.grand_total,
+            created_by="SYSTEM"
+        )
+        db.add(db_header)
+        await db.flush()  # To get the header ID
+
+        # Create Details
+        for detail_in in obj_in.details:
+            db_detail = QuotationDetail(
+                header_id=db_header.id,
+                link_foto=detail_in.link_foto,
+                creator_name=detail_in.creator_name,
+                creator_username=detail_in.creator_username,
+                creator_post=detail_in.creator_post,
+                followers=detail_in.followers,
+                sow_id=detail_in.sow_id,
+                quantity=detail_in.quantity,
+                id_medsos=detail_in.id_medsos,
+                rate=detail_in.rate,
+                total_cost=detail_in.total_cost,
+                er=detail_in.er,
+                avg_view=detail_in.avg_view,
+                avg_brand_view=detail_in.avg_brand_view,
+                created_by="SYSTEM"
+            )
+            db.add(db_detail)
+
+        await db.commit()
+        await db.refresh(db_header)
+        return db_header
 
     async def update(self, db: AsyncSession, *, db_obj: QuotationHeader, obj_in: QuotationUpdate) -> QuotationHeader:
         update_data = obj_in.model_dump(exclude_unset=True)

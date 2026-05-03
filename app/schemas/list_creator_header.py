@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
+from decimal import Decimal
 
 class ListCreatorHeaderBase(BaseModel):
     name_list: Optional[str] = None
@@ -11,6 +12,23 @@ class ListCreatorHeaderCreate(ListCreatorHeaderBase):
 
 class ListCreatorHeaderUpdate(ListCreatorHeaderBase):
     pass
+
+class ListCreatorDetailBulkCreate(BaseModel):
+    link_foto: Optional[str] = None
+    creator_name: str
+    creator_username: Optional[str] = None
+    creator_post: Optional[int] = 0
+    followers: Optional[int] = 0
+    sow_id: Optional[int] = None
+    quantity: Optional[int] = 0
+    id_medsos: Optional[int] = None
+    rate: Optional[Decimal] = Decimal("0.00")
+    er: Optional[Decimal] = None
+    avg_view: Optional[Decimal] = None
+    avg_brand_view: Optional[Decimal] = None
+
+class ListCreatorWithDetailCreate(ListCreatorHeaderCreate):
+    details: list[ListCreatorDetailBulkCreate]
 
 class ListCreatorHeaderResponse(ListCreatorHeaderBase):
     id: int

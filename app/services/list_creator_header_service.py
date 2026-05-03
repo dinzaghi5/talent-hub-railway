@@ -1,7 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models.list_creator_header import ListCreatorHeader
-from app.schemas.list_creator_header import ListCreatorHeaderCreate, ListCreatorHeaderUpdate
+from app.models.list_creator_detail import ListCreatorDetail
+from app.schemas.list_creator_header import ListCreatorHeaderCreate, ListCreatorHeaderUpdate, ListCreatorWithDetailCreate
 
 class ListCreatorHeaderService:
     async def get(self, db: AsyncSession, id: int) -> ListCreatorHeader | None:
@@ -37,6 +38,40 @@ class ListCreatorHeaderService:
         for db_obj in db_objs:
             await db.refresh(db_obj)
         return db_objs
+
+    async def create_with_details(self, db: AsyncSession, obj_in: ListCreatorWithDetailCreate) -> ListCreatorHeader:
+        # Create Header
+        db_header = ListCreatorHeader(
+            name_list=obj_in.name_list,
+            total_creator=obj_in.total_creator,
+            created_by="SYSTEM"
+        )
+        db.add(db_header)
+        await db.flush()  # To get the header ID
+
+        # Create Details
+        for detail_in in obj_in.details:
+            db_detail = ListCreatorDetail(
+                header_id=db_header.id,
+                link_foto=detail_in.link_foto,
+                creator_name=detail_in.creator_name,
+                creator_username=detail_in.creator_username,
+                creator_post=detail_in.creator_post,
+                followers=detail_in.followers,
+                sow_id=detail_in.sow_id,
+                quantity=detail_in.quantity,
+                id_medsos=detail_in.id_medsos,
+                rate=detail_in.rate,
+                er=detail_in.er,
+                avg_view=detail_in.avg_view,
+                avg_brand_view=detail_in.avg_brand_view,
+                created_by="SYSTEM"
+            )
+            db.add(db_detail)
+
+        await db.commit()
+        await db.refresh(db_header)
+        return db_header
 
     async def update(self, db: AsyncSession, *, db_obj: ListCreatorHeader, obj_in: ListCreatorHeaderUpdate) -> ListCreatorHeader:
         update_data = obj_in.model_dump(exclude_unset=True)

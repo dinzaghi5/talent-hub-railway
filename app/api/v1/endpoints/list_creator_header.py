@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Union
 
 from app.api import deps
-from app.schemas.list_creator_header import ListCreatorHeaderCreate, ListCreatorHeaderResponse, ListCreatorHeaderUpdate
+from app.schemas.list_creator_header import ListCreatorHeaderCreate, ListCreatorHeaderResponse, ListCreatorHeaderUpdate, ListCreatorWithDetailCreate
 from app.services.list_creator_header_service import list_creator_header_service
 
 router = APIRouter()
@@ -17,6 +17,16 @@ async def create_list_creator_header(
     Create new List Creator Header(s).
     """
     return await list_creator_header_service.create_multi(db, objs_in=obj_in)
+
+@router.post("/with-details", response_model=ListCreatorHeaderResponse, status_code=status.HTTP_201_CREATED)
+async def create_list_creator_with_details(
+    obj_in: ListCreatorWithDetailCreate,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """
+    Create a new List Creator Header with details.
+    """
+    return await list_creator_header_service.create_with_details(db, obj_in=obj_in)
 
 @router.get("/", response_model=List[ListCreatorHeaderResponse])
 async def read_list_creator_headers(

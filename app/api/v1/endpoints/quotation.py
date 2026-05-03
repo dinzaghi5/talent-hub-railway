@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.api import deps
-from app.schemas.quotation import QuotationCreate, QuotationResponse, QuotationUpdate, QuotationStatusUpdate
+from app.schemas.quotation import QuotationCreate, QuotationResponse, QuotationUpdate, QuotationStatusUpdate, QuotationWithDetailCreate
 from app.services.quotation_service import quotation_service
 
 router = APIRouter()
@@ -19,6 +19,16 @@ async def create_quotation(
     e.g. QT20260408001
     """
     return await quotation_service.create(db, obj_in=quotation_in)
+
+@router.post("/with-details", response_model=QuotationResponse, status_code=status.HTTP_201_CREATED)
+async def create_quotation_with_details(
+    quotation_in: QuotationWithDetailCreate,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """
+    Create a new quotation with details.
+    """
+    return await quotation_service.create_with_details(db, obj_in=quotation_in)
 
 @router.get("/", response_model=List[QuotationResponse])
 async def read_quotations(

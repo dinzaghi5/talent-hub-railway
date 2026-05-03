@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime, date
 from decimal import Decimal
+from .quotation_detail import QuotationDetailCreate
 
 class QuotationBase(BaseModel):
     invoice_code: Optional[str] = None
@@ -21,6 +22,24 @@ class QuotationCreate(QuotationBase):
 
 class QuotationUpdate(QuotationBase):
     pass
+
+class QuotationDetailBulkCreate(BaseModel):
+    link_foto: Optional[str] = None
+    creator_name: str
+    creator_username: Optional[str] = None
+    creator_post: Optional[int] = 0
+    followers: Optional[int] = 0
+    sow_id: Optional[int] = None
+    quantity: Optional[int] = 0
+    id_medsos: Optional[int] = None
+    rate: Optional[Decimal] = 0
+    total_cost: Optional[Decimal] = 0
+    er: Optional[Decimal] = None
+    avg_view: Optional[Decimal] = None
+    avg_brand_view: Optional[Decimal] = None
+
+class QuotationWithDetailCreate(QuotationCreate):
+    details: list[QuotationDetailBulkCreate]
 
 class QuotationStatusUpdate(BaseModel):
     status_quotation: int
