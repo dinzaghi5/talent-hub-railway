@@ -33,11 +33,7 @@ async def fetch_kol_from_external_api(
     result = await kol_service.get_kol_data(db, kol_account=kol_account, socmed_type=socmed_type)
 
     #get data detail
-    return KOLResponse(
-        code=200,
-        message="Success",
-        data=result
-    )
+    return result
 
 @router.get("/db/", response_model=KOLResponse)
 async def fetch_kol_from_external_api(

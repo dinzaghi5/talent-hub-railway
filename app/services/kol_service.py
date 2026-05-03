@@ -22,7 +22,7 @@ from sqlalchemy.future import select
 from app.models.kol import KOLDetailModel, KOLHeaderModel
 from app.models.brand import Brand
 from app.schemas.brand import BrandCreate, BrandUpdate
-from app.schemas.kol import KOLBase, KOLCreate, KOLData, KOLHeader, KOLSearch, KOLUpdate, PostData
+from app.schemas.kol import KOLBase, KOLCreate, KOLData, KOLHeader, KOLResponse, KOLSearch, KOLUpdate, PostData
 from app.models.report import Report
 
 class KOLService:
@@ -191,6 +191,23 @@ class KOLService:
             actor_id="apify~instagram-scraper"
         )
 
+        if not items:
+            print(f"<==== No posts found for {kol_account}")
+            return KOLData(
+                header=KOLHeader(),
+                detail=KOLBase(),
+                error_message=f"No posts found for {kol_account}"
+            )
+
+        item = items[0]
+        if item.get("error") or item.get("requestErrorMessages"):
+            print("Apify error:", item.get("errorDescription"))
+            return KOLData(
+                header=KOLHeader(),
+                detail=KOLBase(),
+                error_message="Cannot get data for " + kol_account + ", due to Instagram policy"
+            )
+
         day_ranges = [7, 30, 60, 90]
         results = []
         inserted_data = []
@@ -223,7 +240,13 @@ class KOLService:
         top_posts_str = json.dumps(top_posts)
 
         header = await self.get_header_kol(db, kol_account=kol_account, latest_post=top_posts_str, socmed_type=socmed_type)
-
+        if not header:
+            print(f"<==== Failed to fetch header for {kol_account}")
+            return KOLData(
+                header=KOLHeader(),
+                detail=KOLBase(),
+                message=f"Instagram account not found: {kol_account}"
+            )
         for days in day_ranges:
             # print("<======== PROCESSING DAY : "+str(days)+"========>\n")
             cutoff = now - timedelta(days=days)
@@ -341,21 +364,27 @@ class KOLService:
             created = await self.create(db, obj_in=data_obj)
 
         result_90_days = await self.get_detail_by_account(db, kol_account=kol_account, days="90", socmed_type=socmed_type)
-        return KOLData(header=header, detail=result_90_days)
+        result_detail = result_90_days if result_90_days else KOLBase()
+        return KOLData(header=header, detail=result_detail)
 
-    async def get_kol_data(self, db: AsyncSession, kol_account: str, socmed_type: str) -> KOLData:
+    async def get_kol_data(self, db: AsyncSession, kol_account: str, socmed_type: str) -> KOLResponse:
         header = await self.get_header_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
 
         # =============================
         # 1. Kalau tidak ada data → fetch API
         # =============================
         if not header:
+            result = None
             print(f"<==== No data, fetching from API: {kol_account}")
             if socmed_type == "tiktok":
-                return await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
+                result = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
             else:
-                return await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
-
+                result = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
+            return KOLResponse(
+                code=200 if result.error_message is None else 404,
+                message="Success" if result.error_message is None else result.error_message,
+                data=result
+            )
 
         # =============================
         # 2. Cek apakah data masih fresh
@@ -381,7 +410,13 @@ class KOLService:
         if is_fresh:
             detail = await self.get_detail_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
             print(f"<==== Fetched fresh data for {kol_account}: {detail}")
-            return KOLData(header=header, detail=detail)
+            message = "Success (from DB, fresh data)" if detail else "No detail data found in DB"
+            data = KOLData(header=header, detail=detail, message=message)
+            return KOLResponse(
+                code=200 if detail else 404,
+                message="Success" if detail else "No detail data found in DB",
+                data=data
+            )
 
 
         # =============================
@@ -390,14 +425,19 @@ class KOLService:
         print(f"<==== Data expired (>7 days), refreshing: {kol_account}")
 
         await self.delete_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
+        result = None
         if socmed_type == "tiktok":
-            data = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
+            result = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
         else:
-            data = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
+            result = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
 
         print(f"<==== Data refreshed: {kol_account}")
 
-        return data
+        return KOLResponse(
+            code=200 if result.error_message is None else 404,
+            message="Success" if result.error_message is None else result.error_message,
+            data=result
+        )
 
     async def get_kol_list(
         self,
@@ -594,8 +634,17 @@ class KOLService:
         if not data_kol_header:
             return KOLData(
                 header=None,
-                detail=None
+                detail=None,
+                message=f"No data found for TikTok account: {kol_account}"
             )
+
+        # if data_kol_header.get("error") or data_kol_header.get("requestErrorMessages"):
+        #     print("Apify error:", data_kol_header.get("errorDescription"))
+        #     return KOLData(
+        #         header=None,
+        #         detail=None,
+        #         message="Apify error: " + data_kol_header.get("errorDescription", "Unknown error")
+        #     )
 
         top_5_raw = sorted(
             data_result,
@@ -767,9 +816,11 @@ class KOLService:
             created_detail = await self.create(db, obj_in=data_detail)
 
         result_90_days = await self.get_detail_by_account(db, kol_account=kol_account, days="90", socmed_type=socmed_type)
+        result_detail = result_90_days if result_90_days else KOLBase()
         return KOLData(
             header=created_header,
-            detail=result_90_days
+            detail=result_detail,
+            message="Success"
         )
     
     async def get_data_post_tiktok(
