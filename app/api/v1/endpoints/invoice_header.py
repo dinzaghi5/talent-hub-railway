@@ -8,7 +8,7 @@ from app.services.invoice_header_service import invoice_header_service
 
 router = APIRouter()
 
-@router.post("/", response_model=InvoiceHeaderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=InvoiceHeaderResponse, status_code=status.HTTP_201_CREATED)
 async def create_invoice_header(
     invoice_in: InvoiceHeaderCreate,
     db: AsyncSession = Depends(deps.get_db)
@@ -18,7 +18,7 @@ async def create_invoice_header(
     """
     return await invoice_header_service.create(db, obj_in=invoice_in)
 
-@router.get("/", response_model=List[InvoiceHeaderResponse])
+@router.get("", response_model=List[InvoiceHeaderResponse])
 async def read_invoice_headers(
     db: AsyncSession = Depends(deps.get_db)
 ):
@@ -27,7 +27,7 @@ async def read_invoice_headers(
     """
     return await invoice_header_service.get_multi(db)
 
-@router.get("/{invoice_code}", response_model=InvoiceHeaderResponse)
+@router.get("/{invoice_code:path}", response_model=InvoiceHeaderResponse)
 async def read_invoice_header(
     invoice_code: str,
     db: AsyncSession = Depends(deps.get_db)
@@ -43,7 +43,7 @@ async def read_invoice_header(
         )
     return invoice
 
-@router.put("/{invoice_code}", response_model=InvoiceHeaderResponse)
+@router.put("/{invoice_code:path}", response_model=InvoiceHeaderResponse)
 async def update_invoice_header(
     invoice_code: str,
     invoice_in: InvoiceHeaderUpdate,
@@ -60,7 +60,7 @@ async def update_invoice_header(
         )
     return await invoice_header_service.update(db, db_obj=invoice, obj_in=invoice_in)
 
-@router.delete("/{invoice_code}", response_model=InvoiceHeaderResponse)
+@router.delete("/{invoice_code:path}", response_model=InvoiceHeaderResponse)
 async def delete_invoice_header(
     invoice_code: str,
     db: AsyncSession = Depends(deps.get_db)
