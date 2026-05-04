@@ -21,7 +21,7 @@ app.add_middleware(
         "https://talent-hub-app-ruby.vercel.app",
         "https://web-production-6e32f.up.railway.app",
     ],
-    allow_origin_regex="https://.*\.vercel\.app",
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
