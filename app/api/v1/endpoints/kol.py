@@ -35,7 +35,7 @@ async def fetch_kol_from_external_api(
     #get data detail
     return result
 
-@router.get("/db", response_model=KOLResponse)
+@router.get("/db/", response_model=KOLResponse)
 async def fetch_kol_from_external_api(
     kol_account: str,
     socmed_type: str,
@@ -59,7 +59,7 @@ async def fetch_kol_from_external_api(
         )
     )
 
-@router.get("/GetList", response_model=KOLResponseList)
+@router.get("/GetList/", response_model=KOLResponseList)
 async def get_kol_list(
     kol_account: str = "",
     min_avg_like: float = 0,
@@ -109,7 +109,7 @@ async def get_kol_post_data(
     #get data detail
     return result
 
-@router.put("/UpdateSetting")
+@router.put("/UpdateSetting/")
 async def update_kol_setting(
     system_val: str,
     db: AsyncSession = Depends(deps.get_db)
@@ -131,7 +131,7 @@ async def update_kol_setting(
         "data": {"updated_rows": result}
     }
 
-@router.get("/GetSetting")
+@router.get("/GetSetting/")
 async def get_kol_setting(
     db: AsyncSession = Depends(deps.get_db)
 ):

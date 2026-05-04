@@ -8,7 +8,7 @@ from app.services.quotation_service import quotation_service
 
 router = APIRouter()
 
-@router.post("", response_model=QuotationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=QuotationResponse, status_code=status.HTTP_201_CREATED)
 async def create_quotation(
     quotation_in: QuotationCreate,
     db: AsyncSession = Depends(deps.get_db)
@@ -30,7 +30,7 @@ async def create_quotation_with_details(
     """
     return await quotation_service.create_with_details(db, obj_in=quotation_in)
 
-@router.get("", response_model=List[QuotationResponse])
+@router.get("/", response_model=List[QuotationResponse])
 async def read_quotations(
     status_quotation: Optional[int] = None,
     db: AsyncSession = Depends(deps.get_db)
