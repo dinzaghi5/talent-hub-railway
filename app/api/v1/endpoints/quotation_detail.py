@@ -30,21 +30,15 @@ async def read_quotation_details(
         return await quotation_detail_service.get_by_header(db, header_id=header_id)
     return await quotation_detail_service.get_multi(db)
 
-@router.get("/{detail_id}", response_model=QuotationDetailResponse)
-async def read_quotation_detail(
-    detail_id: int,
+@router.get("/{header_id}", response_model=List[QuotationDetailResponse])
+async def read_quotation_details_by_header(
+    header_id: int,
     db: AsyncSession = Depends(deps.get_db)
 ):
     """
-    Get quotation detail by ID.
+    Get all quotation details for a specific header ID.
     """
-    detail = await quotation_detail_service.get(db, detail_id=detail_id)
-    if not detail:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Quotation detail not found",
-        )
-    return detail
+    return await quotation_detail_service.get_by_header(db, header_id=header_id)
 
 @router.put("/{detail_id}", response_model=QuotationDetailResponse)
 async def update_quotation_detail(
