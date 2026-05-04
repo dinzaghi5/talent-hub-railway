@@ -8,7 +8,7 @@ from app.services.invoice_header_service import invoice_header_service
 
 router = APIRouter()
 
-@router.post("", response_model=InvoiceHeaderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=InvoiceHeaderResponse, status_code=status.HTTP_201_CREATED)
 async def create_invoice_header(
     invoice_in: InvoiceHeaderCreate,
     db: AsyncSession = Depends(deps.get_db)
@@ -18,7 +18,7 @@ async def create_invoice_header(
     """
     return await invoice_header_service.create(db, obj_in=invoice_in)
 
-@router.get("", response_model=List[InvoiceHeaderResponse])
+@router.get("/", response_model=List[InvoiceHeaderResponse])
 async def read_invoice_headers(
     db: AsyncSession = Depends(deps.get_db)
 ):
