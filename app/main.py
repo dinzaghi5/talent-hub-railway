@@ -14,7 +14,13 @@ app = FastAPI(
 # Set all CORS enabled origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin).strip("/") for origin in settings.BACKEND_CORS_ORIGINS],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "https://talent-hub-app-ruby.vercel.app",
+        "https://web-production-6e32f.up.railway.app",
+    ],
     allow_origin_regex="https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
