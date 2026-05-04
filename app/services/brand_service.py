@@ -21,6 +21,7 @@ class BrandService:
             brand_pic_1=obj_in.brand_pic_1,
             brand_pic_2=obj_in.brand_pic_2,
             brand_pic_3=obj_in.brand_pic_3,
+            inisial=obj_in.inisial,
             created_by="SYSTEM"
         )
         db.add(db_obj)

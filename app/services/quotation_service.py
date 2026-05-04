@@ -5,22 +5,32 @@ from typing import Optional, List
 from datetime import date
 from app.models.report import Report
 from app.models.quotation import QuotationHeader
+from app.models.brand import Brand
 from app.models.quotation_detail import QuotationDetail
 from app.schemas.quotation import QuotationCreate, QuotationUpdate, QuotationWithDetailCreate
 
 
 class QuotationService:
 
-    async def _generate_quotation_code(self, db: AsyncSession) -> str:
-        """
-        Generate quotation_code with format: QT{YYYYMMDD}{3-digit-increment}
-        e.g. QT20260408001, QT20260408002, ...
-        Increment resets every day.
-        """
-        today_str = date.today().strftime("%Y%m%d")
-        prefix = f"QT{today_str}"
+    def _get_roman_month(self, month: int) -> str:
+        roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+        return roman[month - 1]
 
-        # Count existing codes with today's prefix
+    async def _generate_quotation_code(self, db: AsyncSession, brand_inisial: str = "DGM") -> str:
+        """
+        Generate quotation_code with format: QTN/BRAND/YEAR/MONTH/SEQ
+        e.g. QTN/DGM/2026/V/001
+        """
+        today = date.today()
+        year = today.year
+        month_roman = self._get_roman_month(today.month)
+        
+        # Clean brand_inisial and use default if empty
+        brand = (brand_inisial or "DGM").upper()
+        
+        prefix = f"QTN/{brand}/{year}/{month_roman}/"
+
+        # Count existing codes with this prefix to get the next sequence
         result = await db.execute(
             select(func.count(QuotationHeader.id)).where(
                 QuotationHeader.quotation_code.like(f"{prefix}%")
@@ -46,8 +56,16 @@ class QuotationService:
         return list(result.scalars().all())
 
     async def create(self, db: AsyncSession, obj_in: QuotationCreate) -> QuotationHeader:
+        # Get brand initial from database
+        brand_inisial = "DGM"
+        if obj_in.brand_name:
+            brand_result = await db.execute(select(Brand).filter(Brand.brand_nm == obj_in.brand_name))
+            brand_obj = brand_result.scalars().first()
+            if brand_obj and brand_obj.inisial:
+                brand_inisial = brand_obj.inisial
+
         # Auto-generate quotation_code
-        quotation_code = await self._generate_quotation_code(db)
+        quotation_code = await self._generate_quotation_code(db, brand_inisial=brand_inisial)
 
         db_obj = QuotationHeader(
             quotation_code=quotation_code,
@@ -68,8 +86,16 @@ class QuotationService:
         return db_obj
 
     async def create_with_details(self, db: AsyncSession, obj_in: QuotationWithDetailCreate) -> QuotationHeader:
+        # Get brand initial from database
+        brand_inisial = "DGM"
+        if obj_in.brand_name:
+            brand_result = await db.execute(select(Brand).filter(Brand.brand_nm == obj_in.brand_name))
+            brand_obj = brand_result.scalars().first()
+            if brand_obj and brand_obj.inisial:
+                brand_inisial = brand_obj.inisial
+
         # Auto-generate quotation_code
-        quotation_code = await self._generate_quotation_code(db)
+        quotation_code = await self._generate_quotation_code(db, brand_inisial=brand_inisial)
 
         # Create Header
         db_header = QuotationHeader(

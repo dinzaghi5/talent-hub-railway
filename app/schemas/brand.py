@@ -10,6 +10,7 @@ class BrandBase(BaseModel):
     brand_pic_1: Optional[str] = None
     brand_pic_2: Optional[str] = None
     brand_pic_3: Optional[str] = None
+    inisial: Optional[str] = None
 
 class BrandCreate(BrandBase):
     brand_nm: str

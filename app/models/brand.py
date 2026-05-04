@@ -13,6 +13,7 @@ class Brand(Base):
     brand_pic_1 = Column(String, nullable=True)
     brand_pic_2 = Column(String, nullable=True)
     brand_pic_3 = Column(String, nullable=True)
+    inisial = Column(String, nullable=True)
     
     created_dt = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String, nullable=True)
