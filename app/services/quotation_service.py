@@ -3,10 +3,13 @@ from sqlalchemy.future import select
 from sqlalchemy import delete, func
 from typing import Optional, List
 from datetime import date
+from fastapi import HTTPException, status
 from app.models.report import Report
 from app.models.quotation import QuotationHeader
 from app.models.brand import Brand
 from app.models.quotation_detail import QuotationDetail
+from app.models.sow import Sow
+from app.models.social_media import SocialMedia
 from app.schemas.quotation import QuotationCreate, QuotationUpdate, QuotationWithDetailCreate
 
 
@@ -86,13 +89,16 @@ class QuotationService:
         return db_obj
 
     async def create_with_details(self, db: AsyncSession, obj_in: QuotationWithDetailCreate) -> QuotationHeader:
-        # Get brand initial from database
-        brand_inisial = "DGM"
-        if obj_in.brand_name:
-            brand_result = await db.execute(select(Brand).filter(Brand.brand_nm == obj_in.brand_name))
-            brand_obj = brand_result.scalars().first()
-            if brand_obj and brand_obj.inisial:
-                brand_inisial = brand_obj.inisial
+        # Validate Brand and get initial
+        brand_result = await db.execute(select(Brand).filter(Brand.brand_nm == obj_in.brand_name))
+        brand_obj = brand_result.scalars().first()
+        if not brand_obj:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Brand with name '{obj_in.brand_name}' not found in Master Brand database."
+            )
+        
+        brand_inisial = brand_obj.inisial or "DGM"
 
         # Auto-generate quotation_code
         quotation_code = await self._generate_quotation_code(db, brand_inisial=brand_inisial)
@@ -115,7 +121,25 @@ class QuotationService:
         await db.flush()  # To get the header ID
 
         # Create Details
-        for detail_in in obj_in.details:
+        for i, detail_in in enumerate(obj_in.details):
+            # Validate SOW if provided
+            if detail_in.sow_id is not None:
+                sow_result = await db.execute(select(Sow).filter(Sow.sow_id == detail_in.sow_id))
+                if not sow_result.scalars().first():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Error at item {i+1}: SOW ID {detail_in.sow_id} not found in Master SOW."
+                    )
+            
+            # Validate Social Media if provided
+            if detail_in.id_medsos is not None:
+                medsos_result = await db.execute(select(SocialMedia).filter(SocialMedia.social_media_id == detail_in.id_medsos))
+                if not medsos_result.scalars().first():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Error at item {i+1}: Social Media ID {detail_in.id_medsos} not found in Master Social Media."
+                    )
+
             db_detail = QuotationDetail(
                 header_id=db_header.id,
                 link_foto=detail_in.link_foto,
