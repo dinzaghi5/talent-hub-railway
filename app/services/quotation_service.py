@@ -141,6 +141,34 @@ class QuotationService:
 
     async def update(self, db: AsyncSession, *, db_obj: QuotationHeader, obj_in: QuotationUpdate) -> QuotationHeader:
         update_data = obj_in.model_dump(exclude_unset=True)
+        
+        # Check if brand_name is being updated to trigger quotation_code update
+        if "brand_name" in update_data and update_data["brand_name"] != db_obj.brand_name:
+            new_brand_name = update_data["brand_name"]
+            
+            # Look up new brand's inisial
+            brand_result = await db.execute(select(Brand).filter(Brand.brand_nm == new_brand_name))
+            brand_obj = brand_result.scalars().first()
+            
+            if brand_obj and brand_obj.inisial:
+                new_inisial = brand_obj.inisial.upper()
+                
+                # Parse current quotation_code: QTN/BRAND/YEAR/MONTH/SEQ
+                old_code = db_obj.quotation_code
+                parts = old_code.split("/")
+                if len(parts) >= 5:
+                    parts[1] = new_inisial # Update the brand part
+                    new_code = "/".join(parts)
+                    db_obj.quotation_code = new_code
+                    
+                    # Also update quotation_code in related reports
+                    from sqlalchemy import update as sqlalchemy_update
+                    await db.execute(
+                        sqlalchemy_update(Report)
+                        .where(Report.quotation_id == db_obj.id)
+                        .values(quotation_code=new_code)
+                    )
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
