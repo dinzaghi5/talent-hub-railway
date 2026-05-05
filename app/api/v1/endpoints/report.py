@@ -8,15 +8,15 @@ from app.services.report_service import report_service
 
 router = APIRouter()
 
-@router.post("/", response_model=ReportResponse, status_code=status.HTTP_201_CREATED)
-async def create_report(
-    report_in: ReportCreate,
+@router.post("/", response_model=List[ReportResponse], status_code=status.HTTP_201_CREATED)
+async def create_reports(
+    reports_in: List[ReportCreate],
     db: AsyncSession = Depends(deps.get_db)
 ):
     """
-    Create a new report.
+    Create new reports (bulk).
     """
-    return await report_service.create(db, obj_in=report_in)
+    return await report_service.create_multi(db, objs_in=reports_in)
 
 @router.get("/", response_model=List[ReportResponse])
 async def read_reports(

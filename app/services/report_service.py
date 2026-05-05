@@ -36,6 +36,31 @@ class ReportService:
         await db.refresh(db_obj)
         return db_obj
 
+    async def create_multi(self, db: AsyncSession, objs_in: list[ReportCreate]) -> list[Report]:
+        db_objs = []
+        for obj_in in objs_in:
+            db_obj = Report(
+                name=obj_in.name,
+                link=obj_in.link,
+                followers=obj_in.followers,
+                er=obj_in.er,
+                avg_view_all_content=obj_in.avg_view_all_content,
+                avg_view_branded_content=obj_in.avg_view_branded_content,
+                rate_reels=obj_in.rate_reels,
+                rate=obj_in.rate,
+                creator_username=obj_in.creator_username,
+                quotation_id=obj_in.quotation_id,
+                quotation_code=obj_in.quotation_code,
+                created_by="SYSTEM"
+            )
+            db.add(db_obj)
+            db_objs.append(db_obj)
+        
+        await db.commit()
+        for db_obj in db_objs:
+            await db.refresh(db_obj)
+        return db_objs
+
     async def update(self, db: AsyncSession, *, db_obj: Report, obj_in: ReportUpdate) -> Report:
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
