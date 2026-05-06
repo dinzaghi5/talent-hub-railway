@@ -27,7 +27,7 @@ async def read_reports(
     """
     return await report_service.get_multi(db)
 
-@router.get("/by-quotation/{quotation_code}", response_model=List[ReportResponse])
+@router.get("/by-quotation/{quotation_code:path}", response_model=List[ReportResponse])
 async def read_reports_by_quotation(
     quotation_code: str,
     db: AsyncSession = Depends(deps.get_db)
