@@ -4,10 +4,11 @@ from warnings import filters
 
 import cloudinary
 from app.core.config import settings
+import asyncio
 
 import requests
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Counter, Dict
 from sqlalchemy import delete, and_, false
 
@@ -138,11 +139,58 @@ class KOLService:
         items: List[Dict[str, Any]] = data_resp.json()
 
         return items
+    
+
+    async def call_apify_new(self, payload: Dict[str, Any], actor_id: str) -> List[Dict[str, Any]]:
+        print(f"<==== Calling Apify Actor: {actor_id} with payload: {payload}")
+        
+        APIFY_TOKEN = settings.APIFY_TOKEN
+        BASE_URL = "https://api.apify.com/v2"
+
+        # 1. Start run (tanpa wait lama)
+        run_url = f"{BASE_URL}/acts/{actor_id}/runs?token={APIFY_TOKEN}"
+        response = requests.post(run_url, json=payload)
+        response.raise_for_status()
+
+        run_data = response.json()["data"]
+        run_id = run_data["id"]
+
+        # 2. Polling status
+        for _ in range(30):  # max 30x cek (±150 detik kalau sleep 5 detik)
+            status_url = f"{BASE_URL}/actor-runs/{run_id}?token={APIFY_TOKEN}"
+            status_resp = requests.get(status_url)
+            status_resp.raise_for_status()
+
+            status_data = status_resp.json()["data"]
+            status = status_data["status"]
+
+            print(f"<==== Checking status: {status}")
+
+            if status == "SUCCEEDED":
+                dataset_id = status_data["defaultDatasetId"]
+                break
+
+            if status in ["FAILED", "ABORTED", "TIMED-OUT"]:
+                raise Exception(f"Actor gagal: {status}")
+
+            await asyncio.sleep(5)  # tunggu sebelum retry
+
+        else:
+            raise Exception("Actor timeout (tidak selesai)")
+
+        # 3. Ambil hasil dataset
+        dataset_url = f"{BASE_URL}/datasets/{dataset_id}/items?clean=true&token={APIFY_TOKEN}"
+        data_resp = requests.get(dataset_url)
+        data_resp.raise_for_status()
+
+        items: List[Dict[str, Any]] = data_resp.json()
+
+        return items
 
     async def get_header_kol(self, db: AsyncSession, kol_account: str, latest_post: str = None, socmed_type: str = "") -> KOLHeader:
         # print("<===================Fetching header data for KOL account:", kol_account)
         #get data header
-        data_result = await self.call_apify({
+        data_result = await self.call_apify_new({
             "addParentData": False,
             "directUrls": [
                 "https://www.instagram.com/" + kol_account + "/",
@@ -177,7 +225,7 @@ class KOLService:
         return header_obj
 
     async def get_detail_kol(self, db: AsyncSession, kol_account: str, socmed_type: str = "") -> KOLData:    
-        items = await self.call_apify({
+        items = await self.call_apify_new({
             "addParentData": False,
             "directUrls": [
                 "https://www.instagram.com/" + kol_account + "/",
@@ -217,27 +265,70 @@ class KOLService:
         # =============================
         # 🔥 TOP 5 POST TERBARU
         # =============================
-        valid_items = []
+        # valid_items = []
 
-        for item in items:
-            ts = item.get("timestamp")
-            if not ts:
-                continue
+        # for item in items:
+        #     ts = item.get("timestamp")
+        #     if not ts:
+        #         continue
 
-            post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            valid_items.append((post_date, item))
+        #     post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        #     valid_items.append((post_date, item))
 
-        # sort by newest
-        valid_items.sort(key=lambda x: x[0], reverse=True)
+        # # sort by newest
+        # valid_items.sort(key=lambda x: x[0], reverse=True)
 
-        top_posts = []
-        for _, item in valid_items[:5]:
-            top_posts.append({
-                "url": item.get("displayUrl"),
+        # top_posts = []
+        # for _, item in valid_items[:5]:
+        #     top_posts.append({
+        #         "url": item.get("displayUrl"),
+        #         "like": item.get("likesCount", 0),
+        #         "comment": item.get("commentsCount", 0)
+        #     })
+        # top_posts_str = json.dumps(top_posts)
+
+        #upload foto top post ke cloudinary
+        top_5_raw = sorted(
+            items,
+            key=lambda x: x.get("timestamp", 0),
+            reverse=True
+        )[:5]
+
+        top_5_posts = []
+
+        for idx, item in enumerate(top_5_raw, start=1):
+            original_url = item.get("displayUrl")
+            print(f"<==== Processing top post {idx} with original URL: {original_url}")
+            uploaded_url = None
+
+            if original_url:
+                try:
+                    uploaded_url = await self.upload_kol_image(image_url=original_url, foto_id=f"{kol_account}_post_{idx}")
+                except Exception as e:
+                    print(f"Upload failed for post {idx}: {e}")
+            print(f"<==== Uploaded URL for post {idx}: {uploaded_url}")
+            top_5_posts.append({
+                "url": uploaded_url,
                 "like": item.get("likesCount", 0),
-                "comment": item.get("commentsCount", 0)
+                "comment": item.get("commentsCount", 0),
+                "createTime": item.get("createTime", 0),
             })
-        top_posts_str = json.dumps(top_posts)
+
+        top_posts_str = json.dumps(top_5_posts).replace('\\', '"')
+
+        # reels_data = await self.call_apify_new({
+        reels_data = await self.call_apify_new({
+            "addParentData": False,
+            "directUrls": [
+                "https://www.instagram.com/" + kol_account + "/",
+            ],
+            "onlyPostsNewerThan": "90 days",
+            "resultsLimit": 50,
+            "resultsType": "reels",
+            "searchLimit": 1,
+            },
+            actor_id="apify~instagram-scraper"
+        )   
 
         header = await self.get_header_kol(db, kol_account=kol_account, latest_post=top_posts_str, socmed_type=socmed_type)
         if not header:
@@ -251,6 +342,7 @@ class KOLService:
             # print("<======== PROCESSING DAY : "+str(days)+"========>\n")
             cutoff = now - timedelta(days=days)
             filtered_items = []
+            filtered_reels = []
 
             for item in items:
                 ts = item.get("timestamp")
@@ -261,6 +353,16 @@ class KOLService:
 
                 if post_date >= cutoff:
                     filtered_items.append(item)
+            
+            for item in reels_data:
+                ts = item.get("timestamp")
+                if not ts:
+                    continue
+
+                post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+                if post_date >= cutoff:
+                    filtered_reels.append(item)
 
             # =============================
             # AGGREGATION
@@ -315,7 +417,6 @@ class KOLService:
             # er = ((avg_like + avg_comment) / avg_reach * 100) if avg_reach > 0 else 0
             er = ((total_likes + total_comments) / total_posts)/header.followers * 100 if header.followers > 0 else 0
             
-            print(video_posts_count, "/", video_posts_brand_count)
             avg_watch_time = total_watch_time / video_posts_count if video_posts_count > 0 else 0
             avg_brand_view = total_views_brand / video_posts_brand_count if video_posts_brand_count > 0 else 0
             # =============================
@@ -324,7 +425,7 @@ class KOLService:
             hashtag_counter = Counter()
             mention_counter = Counter()
 
-            for item in filtered_items:
+            for item in filtered_reels:
                 hashtags = item.get("hashtags", []) or []
                 tagged_users = item.get("taggedUsers", []) or []
 
@@ -557,7 +658,7 @@ class KOLService:
             "resultsLimit": 1,
         }
 
-        data_result = await self.call_apify(payload, actor_id="apify~instagram-scraper")
+        data_result = await self.call_apify_new(payload, actor_id="apify~instagram-scraper")
         
         data_kol = data_result[0] if data_result else None
         if not data_kol:
@@ -601,7 +702,7 @@ class KOLService:
             socmed_type: str
         ) -> KOLData:
 
-        data_result = await self.call_apify(
+        data_result = await self.call_apify_new(
             {
                 "commentsPerPost": 0,
                 "excludePinnedPosts": False,
@@ -828,7 +929,7 @@ class KOLService:
             post_url: str
         ) -> PostData:
 
-        data_result = await self.call_apify(
+        data_result = await self.call_apify_new(
             {
                 "commentsPerPost": 0,
                 "excludePinnedPosts": False,
@@ -946,6 +1047,7 @@ class KOLService:
                 overwrite=True,                 # 🔥 replace file lama
                 resource_type="image"
             )
+            print (f"<==== Uploaded image for {foto_id}: {result.get('secure_url')}")
             return result.get("secure_url")
         except Exception as e:
             print("Upload failed:", e)

@@ -95,7 +95,7 @@ async def get_kol_list(
         data=result
     )
 
-@router.get("/GetPostData", response_model=PostData)
+@router.get("/GetPostData/", response_model=PostData)
 async def get_kol_post_data(
     id: str,
     db: AsyncSession = Depends(deps.get_db)
