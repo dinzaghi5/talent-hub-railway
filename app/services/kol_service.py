@@ -1,4 +1,5 @@
 import json
+import math
 from unittest import result
 from warnings import filters
 
@@ -234,7 +235,7 @@ class KOLService:
             "resultsLimit": 50,
             "resultsType": "posts",
             "searchLimit": 1,
-            "searchType": "hashtag"
+            # "searchType": "hashtag"
             },
             actor_id="apify~instagram-scraper"
         )
@@ -339,7 +340,7 @@ class KOLService:
                 message=f"Instagram account not found: {kol_account}"
             )
         for days in day_ranges:
-            # print("<======== PROCESSING DAY : "+str(days)+"========>\n")
+            print("<======== PROCESSING DAY : "+str(days)+"========>")
             cutoff = now - timedelta(days=days)
             filtered_items = []
             filtered_reels = []
@@ -350,9 +351,12 @@ class KOLService:
                     continue
 
                 post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-                if post_date >= cutoff:
+                
+                if post_date >= cutoff and item.get("videoViewCount", 0) == 0: # pastikan hanya post biasa (bukan reels) yang dihitung di sini, karena reels akan dihitung di blok reels
+                    # print(f"<==== Found regular post id {item.get('id')}")
                     filtered_items.append(item)
+            
+            # print(f"<==== Found {len(filtered_items)} regular posts for {kol_account} in last {days} days")
             
             for item in reels_data:
                 ts = item.get("timestamp")
@@ -361,23 +365,54 @@ class KOLService:
 
                 post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
-                if post_date >= cutoff:
+                if post_date >= cutoff and item.get("videoViewCount", 0) > 0: # pastikan hanya reels yang dihitung di sini
                     filtered_reels.append(item)
+            # print(f"<==== Found {len(filtered_reels)} reels for {kol_account} in last {days} days")
 
             # =============================
             # AGGREGATION
             # =============================
 
-            total_posts = len(filtered_items)
+            total_posts = len(filtered_items) + len(filtered_reels)  # total post dihitung dari gabungan post biasa + reels, karena reels juga termasuk jenis post di Instagram, bukan kategori terpisah
             total_likes = 0
             total_comments = 0
             total_views = 0
             total_views_brand = 0
             total_reach = 0
             total_watch_time = 0
-            video_posts_count = 0
+            total_watch_time_brand = 0
+            # video_posts_count = 0
             video_posts_brand_count = 0
+            total_er = 0
 
+            # loopin data dari reels
+            for item in filtered_reels:
+                likes = item.get("likesCount", 0)
+                comments = item.get("commentsCount", 0)
+                views = item.get("videoPlayCount", 0)
+                play_count = item.get("videoPlayCount", 0)
+                duration = item.get("videoDuration", 0)
+                mentions = item.get("mentions", [])
+
+                total_likes += likes
+                total_comments += comments
+                # print(f"likes: {likes} | comments: {comments} | views: {views} | followers: {header.followers}")
+                total_er += ((likes + comments + views) / header.followers) if header.followers > 0 else 0 
+
+                if views and views > 0:
+                    total_views += views
+                    total_reach += views
+                    # video_posts_count += 1
+                    if mentions and len(mentions) > 0:
+                        total_views_brand += views
+                        video_posts_brand_count += 1
+                        if play_count and duration:
+                            total_watch_time_brand += (play_count * duration)
+                    else:
+                        if play_count and duration:
+                            total_watch_time += (play_count * duration)
+
+            # looping data post biasa
             for item in filtered_items:
                 likes = item.get("likesCount", 0)
                 comments = item.get("commentsCount", 0)
@@ -388,37 +423,42 @@ class KOLService:
 
                 total_likes += likes
                 total_comments += comments
+                # total_er += ((likes + comments + views) / header.followers * 100) if header.followers > 0 else 0 
 
-                if views and views > 0:
-                    total_views += views
-                    total_reach += views
-                    video_posts_count += 1
-                    if mentions and len(mentions) > 0:
-                        total_views_brand += views
-                        video_posts_brand_count += 1
-
-                if play_count and duration:
-                    total_watch_time += (play_count * duration)
 
             # skip kalau tidak ada data (optional, lebih proper)
             if total_posts == 0:
                 continue
 
-            video_posts_count = video_posts_count if video_posts_count > 0 else 1
+            # video_posts_count = video_posts_count if video_posts_count > 0 else 1
 
-            avg_like = total_likes / total_posts
-            avg_comment = total_comments / total_posts
+            avg_like = total_likes / total_posts if total_posts > 0 else 0
+            avg_comment = total_comments / total_posts if total_posts > 0 else 0
 
             # avg_reach = (total_reach / total_posts) * 0.7
-            avg_reach = total_views / total_posts
+            avg_reach = total_views / total_posts if total_views > 0 else 0
             
-            avg_view = total_views / video_posts_count
+            avg_view = total_views / total_posts if total_views > 0 else 0
             
             # er = ((avg_like + avg_comment) / avg_reach * 100) if avg_reach > 0 else 0
-            er = ((total_likes + total_comments) / total_posts)/header.followers * 100 if header.followers > 0 else 0
+            # er = ((total_likes + total_comments) / total_posts)/header.followers * 100 if header.followers > 0 else 0
+            er = total_er / len(filtered_reels) if len(filtered_reels) > 0 else 0
+
+            factor = 0.4
+            if duration <= 15:
+                factor = 0.5
+            elif duration <= 60:
+                factor = 0.4
+            else:
+                factor = 0.3
             
-            avg_watch_time = total_watch_time / video_posts_count if video_posts_count > 0 else 0
-            avg_brand_view = total_views_brand / video_posts_brand_count if video_posts_brand_count > 0 else 0
+            avg_watch_time = total_watch_time * factor if total_watch_time > 0 else 0
+            
+            # avg_watch_time = round(total_watch_time / len(filtered_reels)) if len(filtered_reels) > 0 else 0
+            
+            avg_brand_view =  total_views_brand / video_posts_brand_count if video_posts_brand_count > 0 else 0
+            # avg_brand_view = total_watch_time_brand * factor if total_watch_time_brand > 0 else 0
+
             # =============================
             # 🔥 TOP HASHTAG & MENTION
             # =============================
@@ -638,9 +678,9 @@ class KOLService:
                 profile_picture=row.profile_picture,
                 total_follower=row.followers,
                 total_post=row.total_post,
-                avg_view=row.avg_view,
-                avg_brand_view=row.avg_brand_view,
-                er=row.er
+                avg_view= f"{row.avg_view:.0f}",
+                avg_brand_view= f"{row.avg_brand_view:.0f}",
+                er= f"{row.er:.3f}"
             ))
         return data
     
@@ -667,15 +707,15 @@ class KOLService:
         duration = data_kol.get("videoDuration", 0)
         play_count = data_kol.get("videoPlayCount", 0)
 
-        factor = 0.4
-        if duration <= 15:
-            factor = 0.5
-        elif duration <= 60:
-            factor = 0.4
-        else:
-            factor = 0.3
+        # factor = 0.4
+        # if duration <= 15:
+        #     factor = 0.5
+        # elif duration <= 60:
+        #     factor = 0.4
+        # else:
+        #     factor = 0.3
         
-        avg_watch_time = play_count * duration * factor
+        avg_watch_time = self.estimated_avg_watch_time(duration=duration, view_count=data_kol.get("videoViewCount", 0), play_count=play_count) if play_count > 0 and duration > 0 else 0
         str_avg_watch_time = self.formatWatchTime(int(avg_watch_time))
         
         return PostData(
@@ -822,7 +862,8 @@ class KOLService:
             total_views_brand = 0
             total_reach = 0
             total_watch_time = 0
-            video_posts_count = 0
+            total_brand_watch_time = 0
+            # video_posts_count = 0
             video_brand_posts_count = 0
 
             for item in filtered_items:
@@ -839,19 +880,20 @@ class KOLService:
                 if views and views > 0:
                     total_views += views
                     total_reach += views
-                    video_posts_count += 1
+                    # video_posts_count += 1
                     if mentions and len(mentions) > 0:
                         total_views_brand += views
                         video_brand_posts_count += 1
-
-                if play_count and duration:
-                    total_watch_time += (play_count * duration)
+                        total_brand_watch_time += (play_count * duration)
+                    else:
+                        if play_count and duration:
+                            total_watch_time += (play_count * duration)
 
             # skip kalau tidak ada data (optional, lebih proper)
             if total_posts == 0:
                 continue
 
-            video_posts_count = video_posts_count if video_posts_count > 0 else 1
+            # video_posts_count = video_posts_count if video_posts_count > 0 else 1
 
             avg_like = total_likes / total_posts
             avg_comment = total_comments / total_posts
@@ -859,13 +901,23 @@ class KOLService:
             # avg_reach = (total_reach / total_posts) * 0.7
             avg_reach = total_views / total_posts
             
-            avg_view = total_views / video_posts_count
-            
+            avg_view = total_views / total_posts if total_posts > 0 else 0
+
             # er = ((avg_like + avg_comment) / avg_reach * 100) if avg_reach > 0 else 0
-            er = ((total_likes + total_comments) / total_posts)/created_header.followers * 100 if created_header.followers > 0 else 0
+            er = ((total_likes + total_comments + total_views) / total_posts)/created_header.followers if created_header.followers > 0 else 0
             
-            avg_watch_time = total_watch_time / video_posts_count
-            avg_brand_view = total_views_brand / video_brand_posts_count if video_brand_posts_count > 0 else 0
+            factor = 0.4
+            if duration <= 15:
+                factor = 0.5
+            elif duration <= 60:
+                factor = 0.4
+            else:
+                factor = 0.3
+            
+            avg_watch_time = total_watch_time * factor if total_watch_time > 0 else 0
+            
+            avg_brand_view = total_brand_watch_time * factor if total_brand_watch_time > 0 else 0
+            
             # =============================
             # 🔥 TOP HASHTAG & MENTION
             # =============================
@@ -902,8 +954,8 @@ class KOLService:
                 "avg_like": avg_like,
                 "avg_comment": avg_comment,
                 "avg_reach": avg_reach,
-                "avg_view": avg_view,
-                "avg_brand_view": avg_brand_view,
+                "avg_view": round(avg_view, 3),
+                "avg_brand_view": round(avg_brand_view, 3),
                 "er": er,
                 "avg_watch_time": avg_watch_time,
                 "last_update": datetime.utcnow(),
@@ -961,15 +1013,15 @@ class KOLService:
         duration = video_meta.get("duration", 0)
         play_count = data_kol.get("playCount", 0)
 
-        factor = 0.4  # default factor
-        if duration <= 15:
-            factor = 0.5
-        elif duration <= 60:
-            factor = 0.4
-        else:
-            factor = 0.3
+        # factor = 0.4  # default factor
+        # if duration <= 15:
+        #     factor = 0.5
+        # elif duration <= 60:
+        #     factor = 0.4
+        # else:
+        #     factor = 0.3
         
-        avg_watch_time = play_count * duration * factor
+        avg_watch_time = self.estimated_avg_watch_time(duration, data_kol.get("viewCount", 0), play_count)
         str_avg_watch_time = self.formatWatchTime(int(avg_watch_time))
 
         return PostData(
@@ -1062,5 +1114,17 @@ class KOLService:
         else:
             hours = seconds // 3600
             return f"{hours} Jam"
+    
+    def estimated_avg_watch_time(self, duration, view_count, play_count):
+        if view_count <= 0 or play_count <= 0:
+            return 0
+
+        ratio = play_count / view_count
+
+        avg_watch_time = duration / (
+            1 + math.log2(ratio)
+        )
+
+        return round(avg_watch_time, 2)
         
 kol_service = KOLService()
