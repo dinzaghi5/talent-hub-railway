@@ -31,13 +31,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Set all CORS enabled origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8000",
-        "https://talent-hub-app-ruby.vercel.app",
-        "https://web-production-6e32f.up.railway.app",
-    ],
     allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
