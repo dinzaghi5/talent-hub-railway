@@ -975,21 +975,26 @@ class PDFService:
             c.roundRect(mx, my, card_w_m, card_h_m, 4, fill=1, stroke=1)
 
             # Colored dot
-            dot_r = 4
+            dot_r = 3.5
             c.setFillColor(color)
-            c.circle(mx + 10, my + card_h_m - 12, dot_r, fill=1, stroke=0)
+            c.circle(mx + 8, my + card_h_m - 12, dot_r, fill=1, stroke=0)
 
             # Label
-            c.setFont('Helvetica', 6.5)
+            c.setFont('Helvetica', 5.8)
             c.setFillColor(TEXT_LABEL)
-            c.drawString(mx + 18, my + card_h_m - 15, label)
+            c.drawString(mx + 14, my + card_h_m - 15, label)
 
             # Value
             if value is None or value == 0 or value == "0" or value == "":
                 val_str = "-"
             else:
                 val_str = f"{value:,}" if isinstance(value, (int, float)) else str(value)
-            c.setFont('Helvetica-Bold', 11)
+            
+            # Auto-shrink value font if too long
+            val_font_size = 11
+            if len(val_str) > 8:
+                val_font_size = 9
+            c.setFont('Helvetica-Bold', val_font_size)
             c.setFillColor(TEXT_DARK)
             c.drawString(mx + 8, my + 10, val_str)
 

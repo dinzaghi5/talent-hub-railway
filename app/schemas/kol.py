@@ -30,7 +30,7 @@ class KOLUpdate(KOLBase):
     pass
 
 class KOLHeader(BaseModel):
-    kol_account: str = None
+    kol_account: str
     kol_name: Optional[str] = None
     bio: Optional[str] = None
     bussiness_category: Optional[str] = None
@@ -61,7 +61,6 @@ class KOLPost(BaseModel):
 class KOLData(BaseModel):
     header: Optional[KOLHeader] = None
     detail: Optional[KOLBase] = None
-    error_message: Optional[str] = None
 
     model_config = {
         "from_attributes": True

@@ -1,15 +1,13 @@
 import json
-import math
 from unittest import result
 from warnings import filters
 
 import cloudinary
 from app.core.config import settings
-import asyncio
 
 import requests
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Counter, Dict
 from sqlalchemy import delete, and_, false
 
@@ -24,7 +22,7 @@ from sqlalchemy.future import select
 from app.models.kol import KOLDetailModel, KOLHeaderModel
 from app.models.brand import Brand
 from app.schemas.brand import BrandCreate, BrandUpdate
-from app.schemas.kol import KOLBase, KOLCreate, KOLData, KOLHeader, KOLResponse, KOLSearch, KOLUpdate, PostData
+from app.schemas.kol import KOLBase, KOLCreate, KOLData, KOLHeader, KOLSearch, KOLUpdate, PostData
 from app.models.report import Report
 
 class KOLService:
@@ -140,58 +138,11 @@ class KOLService:
         items: List[Dict[str, Any]] = data_resp.json()
 
         return items
-    
-
-    async def call_apify_new(self, payload: Dict[str, Any], actor_id: str) -> List[Dict[str, Any]]:
-        print(f"<==== Calling Apify Actor: {actor_id} with payload: {payload}")
-        
-        APIFY_TOKEN = settings.APIFY_TOKEN
-        BASE_URL = "https://api.apify.com/v2"
-
-        # 1. Start run (tanpa wait lama)
-        run_url = f"{BASE_URL}/acts/{actor_id}/runs?token={APIFY_TOKEN}"
-        response = requests.post(run_url, json=payload)
-        response.raise_for_status()
-
-        run_data = response.json()["data"]
-        run_id = run_data["id"]
-
-        # 2. Polling status
-        for _ in range(30):  # max 30x cek (±150 detik kalau sleep 5 detik)
-            status_url = f"{BASE_URL}/actor-runs/{run_id}?token={APIFY_TOKEN}"
-            status_resp = requests.get(status_url)
-            status_resp.raise_for_status()
-
-            status_data = status_resp.json()["data"]
-            status = status_data["status"]
-
-            print(f"<==== Checking status: {status}")
-
-            if status == "SUCCEEDED":
-                dataset_id = status_data["defaultDatasetId"]
-                break
-
-            if status in ["FAILED", "ABORTED", "TIMED-OUT"]:
-                raise Exception(f"Actor gagal: {status}")
-
-            await asyncio.sleep(5)  # tunggu sebelum retry
-
-        else:
-            raise Exception("Actor timeout (tidak selesai)")
-
-        # 3. Ambil hasil dataset
-        dataset_url = f"{BASE_URL}/datasets/{dataset_id}/items?clean=true&token={APIFY_TOKEN}"
-        data_resp = requests.get(dataset_url)
-        data_resp.raise_for_status()
-
-        items: List[Dict[str, Any]] = data_resp.json()
-
-        return items
 
     async def get_header_kol(self, db: AsyncSession, kol_account: str, latest_post: str = None, socmed_type: str = "") -> KOLHeader:
         # print("<===================Fetching header data for KOL account:", kol_account)
         #get data header
-        data_result = await self.call_apify_new({
+        data_result = await self.call_apify({
             "addParentData": False,
             "directUrls": [
                 "https://www.instagram.com/" + kol_account + "/",
@@ -226,7 +177,7 @@ class KOLService:
         return header_obj
 
     async def get_detail_kol(self, db: AsyncSession, kol_account: str, socmed_type: str = "") -> KOLData:    
-        items = await self.call_apify_new({
+        items = await self.call_apify({
             "addParentData": False,
             "directUrls": [
                 "https://www.instagram.com/" + kol_account + "/",
@@ -235,27 +186,10 @@ class KOLService:
             "resultsLimit": 50,
             "resultsType": "posts",
             "searchLimit": 1,
-            # "searchType": "hashtag"
+            "searchType": "hashtag"
             },
             actor_id="apify~instagram-scraper"
         )
-
-        if not items:
-            print(f"<==== No posts found for {kol_account}")
-            return KOLData(
-                header=KOLHeader(),
-                detail=KOLBase(),
-                error_message=f"No posts found for {kol_account}"
-            )
-
-        item = items[0]
-        if item.get("error") or item.get("requestErrorMessages"):
-            print("Apify error:", item.get("errorDescription"))
-            return KOLData(
-                header=KOLHeader(),
-                detail=KOLBase(),
-                error_message="Cannot get data for " + kol_account + ", due to Instagram policy"
-            )
 
         day_ranges = [7, 30, 60, 90]
         results = []
@@ -266,84 +200,34 @@ class KOLService:
         # =============================
         # 🔥 TOP 5 POST TERBARU
         # =============================
-        # valid_items = []
+        valid_items = []
 
-        # for item in items:
-        #     ts = item.get("timestamp")
-        #     if not ts:
-        #         continue
+        for item in items:
+            ts = item.get("timestamp")
+            if not ts:
+                continue
 
-        #     post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        #     valid_items.append((post_date, item))
+            post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            valid_items.append((post_date, item))
 
-        # # sort by newest
-        # valid_items.sort(key=lambda x: x[0], reverse=True)
+        # sort by newest
+        valid_items.sort(key=lambda x: x[0], reverse=True)
 
-        # top_posts = []
-        # for _, item in valid_items[:5]:
-        #     top_posts.append({
-        #         "url": item.get("displayUrl"),
-        #         "like": item.get("likesCount", 0),
-        #         "comment": item.get("commentsCount", 0)
-        #     })
-        # top_posts_str = json.dumps(top_posts)
-
-        #upload foto top post ke cloudinary
-        top_5_raw = sorted(
-            items,
-            key=lambda x: x.get("timestamp", 0),
-            reverse=True
-        )[:5]
-
-        top_5_posts = []
-
-        for idx, item in enumerate(top_5_raw, start=1):
-            original_url = item.get("displayUrl")
-            print(f"<==== Processing top post {idx} with original URL: {original_url}")
-            uploaded_url = None
-
-            if original_url:
-                try:
-                    uploaded_url = await self.upload_kol_image(image_url=original_url, foto_id=f"{kol_account}_post_{idx}")
-                except Exception as e:
-                    print(f"Upload failed for post {idx}: {e}")
-            print(f"<==== Uploaded URL for post {idx}: {uploaded_url}")
-            top_5_posts.append({
-                "url": uploaded_url,
+        top_posts = []
+        for _, item in valid_items[:5]:
+            top_posts.append({
+                "url": item.get("displayUrl"),
                 "like": item.get("likesCount", 0),
-                "comment": item.get("commentsCount", 0),
-                "createTime": item.get("createTime", 0),
+                "comment": item.get("commentsCount", 0)
             })
-
-        top_posts_str = json.dumps(top_5_posts).replace('\\', '"')
-
-        # reels_data = await self.call_apify_new({
-        reels_data = await self.call_apify_new({
-            "addParentData": False,
-            "directUrls": [
-                "https://www.instagram.com/" + kol_account + "/",
-            ],
-            "onlyPostsNewerThan": "90 days",
-            "resultsLimit": 50,
-            "resultsType": "reels",
-            "searchLimit": 1,
-            },
-            actor_id="apify~instagram-scraper"
-        )   
+        top_posts_str = json.dumps(top_posts)
 
         header = await self.get_header_kol(db, kol_account=kol_account, latest_post=top_posts_str, socmed_type=socmed_type)
-        if not header:
-            print(f"<==== Failed to fetch header for {kol_account}")
-            return KOLData(
-                header=KOLHeader(),
-                detail=KOLBase(),
-                message=f"Instagram account not found: {kol_account}"
-            )
+
         for days in day_ranges:
-            print("<======== PROCESSING DAY : "+str(days)+"========>")
+            # print("<======== PROCESSING DAY : "+str(days)+"========>\n")
             cutoff = now - timedelta(days=days)
             filtered_items = []
-            filtered_reels = []
 
             for item in items:
                 ts = item.get("timestamp")
@@ -351,68 +235,24 @@ class KOLService:
                     continue
 
                 post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                
-                if post_date >= cutoff and item.get("videoViewCount", 0) == 0: # pastikan hanya post biasa (bukan reels) yang dihitung di sini, karena reels akan dihitung di blok reels
-                    # print(f"<==== Found regular post id {item.get('id')}")
+
+                if post_date >= cutoff:
                     filtered_items.append(item)
-            
-            # print(f"<==== Found {len(filtered_items)} regular posts for {kol_account} in last {days} days")
-            
-            for item in reels_data:
-                ts = item.get("timestamp")
-                if not ts:
-                    continue
-
-                post_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-                if post_date >= cutoff and item.get("videoViewCount", 0) > 0: # pastikan hanya reels yang dihitung di sini
-                    filtered_reels.append(item)
-            # print(f"<==== Found {len(filtered_reels)} reels for {kol_account} in last {days} days")
 
             # =============================
             # AGGREGATION
             # =============================
 
-            total_posts = len(filtered_items) + len(filtered_reels)  # total post dihitung dari gabungan post biasa + reels, karena reels juga termasuk jenis post di Instagram, bukan kategori terpisah
+            total_posts = len(filtered_items)
             total_likes = 0
             total_comments = 0
             total_views = 0
             total_views_brand = 0
             total_reach = 0
             total_watch_time = 0
-            total_watch_time_brand = 0
-            # video_posts_count = 0
+            video_posts_count = 0
             video_posts_brand_count = 0
-            total_er = 0
 
-            # loopin data dari reels
-            for item in filtered_reels:
-                likes = item.get("likesCount", 0)
-                comments = item.get("commentsCount", 0)
-                views = item.get("videoPlayCount", 0)
-                play_count = item.get("videoPlayCount", 0)
-                duration = item.get("videoDuration", 0)
-                mentions = item.get("mentions", [])
-
-                total_likes += likes
-                total_comments += comments
-                # print(f"likes: {likes} | comments: {comments} | views: {views} | followers: {header.followers}")
-                total_er += ((likes + comments + views) / header.followers) if header.followers > 0 else 0 
-
-                if views and views > 0:
-                    total_views += views
-                    total_reach += views
-                    # video_posts_count += 1
-                    if mentions and len(mentions) > 0:
-                        total_views_brand += views
-                        video_posts_brand_count += 1
-                        if play_count and duration:
-                            total_watch_time_brand += (play_count * duration)
-                    else:
-                        if play_count and duration:
-                            total_watch_time += (play_count * duration)
-
-            # looping data post biasa
             for item in filtered_items:
                 likes = item.get("likesCount", 0)
                 comments = item.get("commentsCount", 0)
@@ -423,49 +263,45 @@ class KOLService:
 
                 total_likes += likes
                 total_comments += comments
-                # total_er += ((likes + comments + views) / header.followers * 100) if header.followers > 0 else 0 
 
+                if views and views > 0:
+                    total_views += views
+                    total_reach += views
+                    video_posts_count += 1
+                    if mentions and len(mentions) > 0:
+                        total_views_brand += views
+                        video_posts_brand_count += 1
+
+                if play_count and duration:
+                    total_watch_time += (play_count * duration)
 
             # skip kalau tidak ada data (optional, lebih proper)
             if total_posts == 0:
                 continue
 
-            # video_posts_count = video_posts_count if video_posts_count > 0 else 1
+            video_posts_count = video_posts_count if video_posts_count > 0 else 1
 
-            avg_like = total_likes / total_posts if total_posts > 0 else 0
-            avg_comment = total_comments / total_posts if total_posts > 0 else 0
+            avg_like = total_likes / total_posts
+            avg_comment = total_comments / total_posts
 
             # avg_reach = (total_reach / total_posts) * 0.7
-            avg_reach = total_views / total_posts if total_views > 0 else 0
+            avg_reach = total_views / total_posts
             
-            avg_view = total_views / total_posts if total_views > 0 else 0
+            avg_view = total_views / video_posts_count
             
             # er = ((avg_like + avg_comment) / avg_reach * 100) if avg_reach > 0 else 0
-            # er = ((total_likes + total_comments) / total_posts)/header.followers * 100 if header.followers > 0 else 0
-            er = total_er / len(filtered_reels) if len(filtered_reels) > 0 else 0
-
-            factor = 0.4
-            if duration <= 15:
-                factor = 0.5
-            elif duration <= 60:
-                factor = 0.4
-            else:
-                factor = 0.3
+            er = ((total_likes + total_comments) / total_posts)/header.followers * 100 if header.followers > 0 else 0
             
-            avg_watch_time = total_watch_time * factor if total_watch_time > 0 else 0
-            
-            # avg_watch_time = round(total_watch_time / len(filtered_reels)) if len(filtered_reels) > 0 else 0
-            
-            avg_brand_view =  total_views_brand / video_posts_brand_count if video_posts_brand_count > 0 else 0
-            # avg_brand_view = total_watch_time_brand * factor if total_watch_time_brand > 0 else 0
-
+            print(video_posts_count, "/", video_posts_brand_count)
+            avg_watch_time = total_watch_time / video_posts_count if video_posts_count > 0 else 0
+            avg_brand_view = total_views_brand / video_posts_brand_count if video_posts_brand_count > 0 else 0
             # =============================
             # 🔥 TOP HASHTAG & MENTION
             # =============================
             hashtag_counter = Counter()
             mention_counter = Counter()
 
-            for item in filtered_reels:
+            for item in filtered_items:
                 hashtags = item.get("hashtags", []) or []
                 tagged_users = item.get("taggedUsers", []) or []
 
@@ -505,27 +341,21 @@ class KOLService:
             created = await self.create(db, obj_in=data_obj)
 
         result_90_days = await self.get_detail_by_account(db, kol_account=kol_account, days="90", socmed_type=socmed_type)
-        result_detail = result_90_days if result_90_days else KOLBase()
-        return KOLData(header=header, detail=result_detail)
+        return KOLData(header=header, detail=result_90_days)
 
-    async def get_kol_data(self, db: AsyncSession, kol_account: str, socmed_type: str) -> KOLResponse:
+    async def get_kol_data(self, db: AsyncSession, kol_account: str, socmed_type: str) -> KOLData:
         header = await self.get_header_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
 
         # =============================
         # 1. Kalau tidak ada data → fetch API
         # =============================
         if not header:
-            result = None
             print(f"<==== No data, fetching from API: {kol_account}")
             if socmed_type == "tiktok":
-                result = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
+                return await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
             else:
-                result = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
-            return KOLResponse(
-                code=200 if result.error_message is None else 404,
-                message="Success" if result.error_message is None else result.error_message,
-                data=result
-            )
+                return await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
+
 
         # =============================
         # 2. Cek apakah data masih fresh
@@ -551,13 +381,7 @@ class KOLService:
         if is_fresh:
             detail = await self.get_detail_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
             print(f"<==== Fetched fresh data for {kol_account}: {detail}")
-            message = "Success (from DB, fresh data)" if detail else "No detail data found in DB"
-            data = KOLData(header=header, detail=detail, message=message)
-            return KOLResponse(
-                code=200 if detail else 404,
-                message="Success" if detail else "No detail data found in DB",
-                data=data
-            )
+            return KOLData(header=header, detail=detail)
 
 
         # =============================
@@ -566,19 +390,14 @@ class KOLService:
         print(f"<==== Data expired (>7 days), refreshing: {kol_account}")
 
         await self.delete_by_account(db, kol_account=kol_account, socmed_type=socmed_type)
-        result = None
         if socmed_type == "tiktok":
-            result = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
+            data = await self.get_data_kol_tiktok(db, kol_account=kol_account, socmed_type=socmed_type)
         else:
-            result = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
+            data = await self.get_detail_kol(db, kol_account=kol_account, socmed_type=socmed_type)
 
         print(f"<==== Data refreshed: {kol_account}")
 
-        return KOLResponse(
-            code=200 if result.error_message is None else 404,
-            message="Success" if result.error_message is None else result.error_message,
-            data=result
-        )
+        return data
 
     async def get_kol_list(
         self,
@@ -678,9 +497,9 @@ class KOLService:
                 profile_picture=row.profile_picture,
                 total_follower=row.followers,
                 total_post=row.total_post,
-                avg_view= f"{row.avg_view:.0f}",
-                avg_brand_view= f"{row.avg_brand_view:.0f}",
-                er= f"{row.er:.3f}"
+                avg_view=row.avg_view,
+                avg_brand_view=row.avg_brand_view,
+                er=row.er
             ))
         return data
     
@@ -698,7 +517,7 @@ class KOLService:
             "resultsLimit": 1,
         }
 
-        data_result = await self.call_apify_new(payload, actor_id="apify~instagram-scraper")
+        data_result = await self.call_apify(payload, actor_id="apify~instagram-scraper")
         
         data_kol = data_result[0] if data_result else None
         if not data_kol:
@@ -707,15 +526,15 @@ class KOLService:
         duration = data_kol.get("videoDuration", 0)
         play_count = data_kol.get("videoPlayCount", 0)
 
-        # factor = 0.4
-        # if duration <= 15:
-        #     factor = 0.5
-        # elif duration <= 60:
-        #     factor = 0.4
-        # else:
-        #     factor = 0.3
+        factor = 0.4
+        if duration <= 15:
+            factor = 0.5
+        elif duration <= 60:
+            factor = 0.4
+        else:
+            factor = 0.3
         
-        avg_watch_time = self.estimated_avg_watch_time(duration=duration, view_count=data_kol.get("videoViewCount", 0), play_count=play_count) if play_count > 0 and duration > 0 else 0
+        avg_watch_time = play_count * duration * factor
         str_avg_watch_time = self.formatWatchTime(int(avg_watch_time))
         
         return PostData(
@@ -742,7 +561,7 @@ class KOLService:
             socmed_type: str
         ) -> KOLData:
 
-        data_result = await self.call_apify_new(
+        data_result = await self.call_apify(
             {
                 "commentsPerPost": 0,
                 "excludePinnedPosts": False,
@@ -775,17 +594,8 @@ class KOLService:
         if not data_kol_header:
             return KOLData(
                 header=None,
-                detail=None,
-                message=f"No data found for TikTok account: {kol_account}"
+                detail=None
             )
-
-        # if data_kol_header.get("error") or data_kol_header.get("requestErrorMessages"):
-        #     print("Apify error:", data_kol_header.get("errorDescription"))
-        #     return KOLData(
-        #         header=None,
-        #         detail=None,
-        #         message="Apify error: " + data_kol_header.get("errorDescription", "Unknown error")
-        #     )
 
         top_5_raw = sorted(
             data_result,
@@ -862,8 +672,7 @@ class KOLService:
             total_views_brand = 0
             total_reach = 0
             total_watch_time = 0
-            total_brand_watch_time = 0
-            # video_posts_count = 0
+            video_posts_count = 0
             video_brand_posts_count = 0
 
             for item in filtered_items:
@@ -880,20 +689,19 @@ class KOLService:
                 if views and views > 0:
                     total_views += views
                     total_reach += views
-                    # video_posts_count += 1
+                    video_posts_count += 1
                     if mentions and len(mentions) > 0:
                         total_views_brand += views
                         video_brand_posts_count += 1
-                        total_brand_watch_time += (play_count * duration)
-                    else:
-                        if play_count and duration:
-                            total_watch_time += (play_count * duration)
+
+                if play_count and duration:
+                    total_watch_time += (play_count * duration)
 
             # skip kalau tidak ada data (optional, lebih proper)
             if total_posts == 0:
                 continue
 
-            # video_posts_count = video_posts_count if video_posts_count > 0 else 1
+            video_posts_count = video_posts_count if video_posts_count > 0 else 1
 
             avg_like = total_likes / total_posts
             avg_comment = total_comments / total_posts
@@ -901,23 +709,13 @@ class KOLService:
             # avg_reach = (total_reach / total_posts) * 0.7
             avg_reach = total_views / total_posts
             
-            avg_view = total_views / total_posts if total_posts > 0 else 0
-
+            avg_view = total_views / video_posts_count
+            
             # er = ((avg_like + avg_comment) / avg_reach * 100) if avg_reach > 0 else 0
-            er = ((total_likes + total_comments + total_views) / total_posts)/created_header.followers if created_header.followers > 0 else 0
+            er = ((total_likes + total_comments) / total_posts)/created_header.followers * 100 if created_header.followers > 0 else 0
             
-            factor = 0.4
-            if duration <= 15:
-                factor = 0.5
-            elif duration <= 60:
-                factor = 0.4
-            else:
-                factor = 0.3
-            
-            avg_watch_time = total_watch_time * factor if total_watch_time > 0 else 0
-            
-            avg_brand_view = total_brand_watch_time * factor if total_brand_watch_time > 0 else 0
-            
+            avg_watch_time = total_watch_time / video_posts_count
+            avg_brand_view = total_views_brand / video_brand_posts_count if video_brand_posts_count > 0 else 0
             # =============================
             # 🔥 TOP HASHTAG & MENTION
             # =============================
@@ -954,8 +752,8 @@ class KOLService:
                 "avg_like": avg_like,
                 "avg_comment": avg_comment,
                 "avg_reach": avg_reach,
-                "avg_view": round(avg_view, 3),
-                "avg_brand_view": round(avg_brand_view, 3),
+                "avg_view": avg_view,
+                "avg_brand_view": avg_brand_view,
                 "er": er,
                 "avg_watch_time": avg_watch_time,
                 "last_update": datetime.utcnow(),
@@ -969,11 +767,9 @@ class KOLService:
             created_detail = await self.create(db, obj_in=data_detail)
 
         result_90_days = await self.get_detail_by_account(db, kol_account=kol_account, days="90", socmed_type=socmed_type)
-        result_detail = result_90_days if result_90_days else KOLBase()
         return KOLData(
             header=created_header,
-            detail=result_detail,
-            message="Success"
+            detail=result_90_days
         )
     
     async def get_data_post_tiktok(
@@ -981,7 +777,7 @@ class KOLService:
             post_url: str
         ) -> PostData:
 
-        data_result = await self.call_apify_new(
+        data_result = await self.call_apify(
             {
                 "commentsPerPost": 0,
                 "excludePinnedPosts": False,
@@ -1013,15 +809,15 @@ class KOLService:
         duration = video_meta.get("duration", 0)
         play_count = data_kol.get("playCount", 0)
 
-        # factor = 0.4  # default factor
-        # if duration <= 15:
-        #     factor = 0.5
-        # elif duration <= 60:
-        #     factor = 0.4
-        # else:
-        #     factor = 0.3
+        factor = 0.4  # default factor
+        if duration <= 15:
+            factor = 0.5
+        elif duration <= 60:
+            factor = 0.4
+        else:
+            factor = 0.3
         
-        avg_watch_time = self.estimated_avg_watch_time(duration, data_kol.get("viewCount", 0), play_count)
+        avg_watch_time = play_count * duration * factor
         str_avg_watch_time = self.formatWatchTime(int(avg_watch_time))
 
         return PostData(
@@ -1099,7 +895,6 @@ class KOLService:
                 overwrite=True,                 # 🔥 replace file lama
                 resource_type="image"
             )
-            print (f"<==== Uploaded image for {foto_id}: {result.get('secure_url')}")
             return result.get("secure_url")
         except Exception as e:
             print("Upload failed:", e)
@@ -1114,17 +909,5 @@ class KOLService:
         else:
             hours = seconds // 3600
             return f"{hours} Jam"
-    
-    def estimated_avg_watch_time(self, duration, view_count, play_count):
-        if view_count <= 0 or play_count <= 0:
-            return 0
-
-        ratio = play_count / view_count
-
-        avg_watch_time = duration / (
-            1 + math.log2(ratio)
-        )
-
-        return round(avg_watch_time, 2)
         
 kol_service = KOLService()
